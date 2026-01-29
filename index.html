@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Business Map – Nearest Finder</title>
+
+    <!-- PapaParse for CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- MarkerCluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+    <style>
+        #map { height: 100vh; width: 100%; }
+        .popup-btn {
+            display: inline-block;
+            margin-top: 5px;
+            padding: 5px 8px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .popup-btn:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- MarkerCluster JS -->
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+let businesses = [];
+
+// Haversine distance (km)
+function distance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2-lat1) * Math.PI/180;
+    const dLon = (lon2-lon1) * Math.PI/180;
+    const a =
+        Math.sin(dLat/2)**2 +
+        Math.cos(lat1*Math.PI/180) *
+        Math.cos(lat2*Math.PI/180) *
+        Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Get marker color based on business_type
+function getMarkerColor(btype) {
+    if(!btype) return 'yellow';
+    const type = btype.toLowerCase();
+    if(type.includes('seller')) return 'green';
+    if(type.includes('trader')) return 'blue';
+    if(type.includes('manufacturer')) return 'red';
+    return 'yellow';
+}
+
+// Initialize map
+function initMap(userLat, userLng) {
+    const map = L.map('map').setView([userLat, userLng], 12);
+
+    // OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    const markers = L.markerClusterGroup();
+
+    // User marker
+    L.marker([userLat, userLng], {
+        title: "You",
+        icon: L.icon({iconUrl: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png', iconSize: [32,32]})
+    }).addTo(map);
+
+    let nearest = null;
+    let minDist = Infinity;
+
+    businesses.forEach(b => {
+        const d = distance(userLat, userLng, b.lat, b.lng);
+        if (d < minDist) {
+            minDist = d;
+            nearest = b;
+        }
+
+        const color = getMarkerColor(b.business_type);
+        const icon = L.icon({iconUrl: `https://maps.google.com/mapfiles/ms/icons/${color}-dot.png`, iconSize: [32,32]});
+        
+        // Google Maps link
+        const gmapLink = `https://www.google.com/maps?q=${b.lat},${b.lng}`;
+
+        const marker = L.marker([b.lat, b.lng], {icon});
+        marker.bindPopup(`
+            <b>${b.business_name}</b><br>
+            Type: ${b.business_type || "Other"}<br>
+            Phone: ${b.phone || "N/A"}<br>
+            Distance: ${d.toFixed(2)} km<br>
+            <a class="popup-btn" href="${gmapLink}" target="_blank">View on Google Maps</a>
+        `);
+        markers.addLayer(marker);
+    });
+
+    map.addLayer(markers);
+
+    // Highlight nearest
+    if (nearest) {
+        const icon = L.icon({iconUrl: 'https://maps.google.com/mapfiles/ms/icons/purple-dot.png', iconSize: [32,32]});
+        L.marker([nearest.lat, nearest.lng], {icon})
+         .addTo(map)
+         .bindPopup(`
+            <b>${nearest.business_name}</b><br>
+            Type: ${nearest.business_type || "Other"}<br>
+            Phone: ${nearest.phone || "N/A"}<br>
+            Nearest to you: ${minDist.toFixed(2)} km<br>
+            <a class="popup-btn" href="https://www.google.com/maps?q=${nearest.lat},${nearest.lng}" target="_blank">View on Google Maps</a>
+        `)
+         .openPopup();
+
+        console.log("Nearest business:", nearest.business_name, minDist.toFixed(2), "km");
+    }
+}
+
+// Load CSV
+Papa.parse("kite_businesses.csv", {
+    download: true,
+    header: true,
+    complete: function(results) {
+        businesses = results.data
+            .filter(r => r.map_link)
+            .map(r => {
+                const q = r.map_link.split("q=")[1];
+                if (!q) return null;
+                const [lat, lng] = q.split(",");
+                return {
+                    business_name: r.business_name || "Business",
+                    phone: r.phone || "N/A",
+                    business_type: r.business_type || "Other",
+                    lat: parseFloat(lat),
+                    lng: parseFloat(lng)
+                };
+            })
+            .filter(Boolean);
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                initMap(pos.coords.latitude, pos.coords.longitude);
+            }, err => {
+                alert("Could not get your location. Showing default map.");
+                initMap(31.6043980, 74.3285940);
+            });
+        } else {
+            alert("Geolocation not supported. Showing default map.");
+            initMap(31.6043980, 74.3285940);
+        }
+    }
+});
+</script>
+</body>
+</html>
